@@ -1,0 +1,154 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Jan 15 10:38:30 2018
+
+@author: Katya
+"""
+
+import pandas as pd
+import numpy as np
+
+
+
+df = pd.read_csv('logs.csv')
+
+# number of unique vid in population= 37613
+df['ot_vid'].nunique()
+
+# remove ot_vid that have produced less than 6 clicks
+
+df['count'] = 1
+grouped = df.groupby(['ot_vid'], as_index = False, sort = False).sum()
+grouped = grouped.loc[grouped['count'] > 5]
+my_list = grouped["ot_vid"].tolist()
+sample = df[df.ot_vid.isin(my_list)]
+del df
+del grouped
+del my_list
+
+
+# number of unique ids after removing those who did less than 5 clicks = 14469
+sample['ot_vid'].nunique()
+
+# sample = sample1[:200000]
+sample['ot_time'] = pd.to_datetime(sample['ot_time'])
+sample = sample[['ot_vid', 'bot_label', 'ns_pageurl', 'ot_time', 'ot_agent',
+                 'ot_pagecluster', 'ot_shopformat']]
+# del sample1
+# sample['time'] = [d.date() for d in sample['ot_time']]
+# sample['ot_time'] = [d.time() for d in sample['ot_time']]
+# del sample['time']
+
+sample = sample.groupby('ot_vid').apply(lambda x: x.sort_values('ot_time'))
+sample.index = np.arange(0, len(sample))
+sample['ot_time'] = pd.to_datetime(sample['ot_time'])
+
+# sample = sample.sort_values(by='ot_time')
+sample['Duration'] = sample.groupby('ot_vid')['ot_time'].diff()
+sample['Duration'] = pd.to_datetime(sample['Duration'])
+# sample['ot_time'] = sample['ot_time'].apply(lambda d :d.time())
+sample['Duration'].fillna(0, inplace=True)
+# sample['diff'] = sample.ot_time.diff().dt.total_seconds().fillna(0)
+sample['minute'] = sample["Duration"].dt.minute
+del sample['Duration']
+sample['value'] = (sample[['ot_vid']] == sample[['ot_vid']].shift(-1)).any(axis=1).astype(int)
+
+''' SESSIONS RETRIEVAL.
+18127 sessions in total.'''
+# Create a list to store the data
+session = []
+
+# For each row in the column,
+n = 1
+for index, row in sample.iterrows():
+    if row['value'] == 1 and row['minute'] <= 30:
+        session.append(n)
+    elif row['value'] == 0 or row['minute'] > 30:
+        session.append(n)
+        n += 1
+
+# Create a column from the list
+sample['session_id'] = session
+# sample['val'] = (sample[['session_id']] == sample[['session_id']].shift(1)).any(axis=1).astype(int)
+del session
+# 
+#sample['session'] = sample.groupby('ot_vid', sort=False)['ns_pageurl'].apply('_'.join)
+#sample['key'] = (sample['ot_vid'] != sample['ot_vid'].shift(1)).astype(int).cumsum()
+
+'''Add a sequence of ns_pageurl'''
+df = pd.DataFrame()
+df['session'] = sample.groupby(['session_id', 'ot_vid'])['ns_pageurl'].apply('_'.join)
+df['lala'] = df.index
+df.index = np.arange(0, len(df))
+df[['session_id', 'ot_vid']] = df['lala'].apply(pd.Series)
+del df['lala']
+
+'''Add bot_label'''
+df1 = pd.DataFrame()
+df1 = sample.groupby(['session_id','ot_vid']).agg(lambda x:x.value_counts().index[0])
+df1.index = np.arange(0, len(df))
+df['bot_label'] = df1['bot_label']
+df['shop_format'] = df1['ot_shopformat']
+del df1
+
+'''Add ot_pagecluster'''
+df1 = pd.DataFrame()
+df1['page_cluster'] = sample.groupby(['session_id', 'ot_vid'])['ot_pagecluster'].apply(','.join)
+df1.index = np.arange(0, len(df))
+df = df.join(df1)
+del df1
+
+'''Extract ot_agent'''
+new_columns = sample.ot_agent.str.extract(r"\((?P<access_device>.+?); (?P<device>.+?)(?: like|;) (?P<column3>.+?)\)", expand=False)
+df = df.join(new_columns)
+del new_columns
+
+''' Calculate duration of a session '''
+ch = sample.copy (deep=True)
+ch = ch.assign(output=ch.groupby('session_id').ot_time.apply(lambda x: x - x.iloc[0]))
+ch['output'] = pd.to_datetime(ch['output'])
+ch['output'].fillna(0, inplace=True)
+ch['minute'] = ch["output"].dt.minute
+ch['second'] = ch["output"].dt.second
+ch['duration_in_sec'] = (ch['minute'] * 60) + ch['second']
+
+gb = ch.groupby('session_id')
+gb = gb.nth(-1)
+del ch
+
+gb['session_id'] = gb.index
+gb.index = np.arange(0, len(df))
+df['duration_in_sec'] = gb['duration_in_sec']
+df['seconds'] = gb['second']
+df['minutes'] = gb['minute']
+del gb
+
+''' Number of pages requested during one session '''
+df['number_of_pages'] = df.page_cluster.apply(lambda x: len(str(x).split(',')))
+
+''' Depth of a session '''
+df['depth'] = df.session.apply(lambda x: str(x).count('/'))
+
+
+''' Occurance of page clusters'''
+df['article_page'] = df.page_cluster.apply(lambda x: str(x).count('Artikeldetailseite'))
+df['my_account_page'] = df.page_cluster.apply(lambda x: str(x).count('MeinKonto'))
+df['bookmarks_page'] = df.page_cluster.apply(lambda x: str(x).count('Merkzettel'))
+
+cols = ['session_id', 'bot_label', 'ot_vid',
+        'minutes', 'seconds', 'duration_in_sec',
+        'number_of_pages', 'access_device', 'depth',
+        'article_page', 'my_account_page', 'bookmarks_page',
+        'shop_format']
+df_1 = df[cols]
+
+sessions = pd.DataFrame()
+sessions = df
+
+
+
+
+
+
+
+
