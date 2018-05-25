@@ -1,0 +1,152 @@
+
+library(clickstream)
+library(arulesSequences)
+library(ggplot2)
+library(RColorBrewer)
+library(dplyr)
+library(caret)
+
+setwd('D:\\study\\3_Semester\\otto_project\\clickstream_data')
+df = read.csv('result_main.csv', header=T)
+df1 = read.csv('result_main.csv', header=T)
+df3 = read.csv('final_sample.csv', header=T, sep = ',')
+
+#summary(df)
+df$bot_label = as.factor(df$bot_label)
+levels(df$bot_label) = c("user", "bot")
+
+#df <- df[order(df$ot_time),]
+
+# unique cookie ids = 37613
+unique_vid <- unique(df$ot_vid)
+# length(unique(new$ot_vid))
+
+# drop duplicates
+df <- df[!duplicated(df[c('ot_vid')]),]
+df <- dplyr::distinct(df, keep_all = F)
+
+# stratified sample of unique ids
+tr_index = createDataPartition(y = df$bot_label, p = 0.4, list = FALSE)
+head(tr_index)
+str_df = df[tr_index, ]
+sample_unique_vid <- unique(str_df$ot_vid)
+#write.csv(sample_unique_vid, "unique.csv", row.names = F)
+
+# check if propotions are kept (13.7% of ids are users, 86.2% bots)
+table(df3$bot_label)/sum(table(df3$bot_label))
+table(str_df$bot_label)/sum(table(str_df$bot_label))
+
+# check length
+length(which(str_df$bot_label == "user"))
+length(which(str_df$bot_label == "bot"))
+
+# create a dataframe just with sampled ids
+new = df1[df1$ot_vid %in% sample_unique_vid,]
+
+# drop data about ids that made <5 clicks
+x <- table(new$ot_vid)
+sample <- new[new$ot_vid %in% names(x[x >= 5]), ]
+
+# naming factors
+sample$bot_label = as.factor(sample$bot_label)
+levels(sample$bot_label) = c("user", "bot")
+
+write.csv(sample, 'sample.csv', row.names = FALSE)
+#sample <- sample[,-1]
+
+t1 <- table(sample$bot_label)
+t1
+barplot(t1)
+
+chisq.test(t1)
+fisher.test(t1)
+
+users = filter(df3, bot_label == 'user')
+bots = filter(df3, bot_label == 'bot')
+
+hist(users$number_of_pages, breaks = 200)
+hist(bots$number_of_pages, breaks = 200)
+mean(users$number_of_pages)
+mean(bots$number_of_pages)
+d <- density(users$delta_time)
+plot(d, main="Kernel Density of Miles Per Gallon")
+polygon(d, col="red", border="blue")
+
+qqnorm(df3$number_of_pages)
+qqline(df3$number_of_pages, col = 2)
+
+d1 <- density(bots$delta_time)
+plot(d1, main="Kernel Density of Miles Per Gallon")
+polygon(d1, col="red", border="blue")
+
+x <- table(df3$number_of_pages)
+df3 <- df3[df3$number_of_pages %in% names(x[x >= 5]), ]
+
+
+# bot lavel is not distributed uniformly (p-value < 2.2e-16)
+chi <- chisq.test(t1)
+
+user <- subset(df3, bot_label == 'user', 
+               select=c(bot_label, eventcreatehour, ot_shopformat))
+bot <- subset(sample, bot_label == 'bot', 
+              select=c(bot_label, eventcreatehour, ot_shopformat))
+mix <- rbind(user, bot)
+
+# Frequency histogram of bots/users click activity 
+theme_set(theme_classic())
+p7 <- ggplot(sample, aes(x = eventcreatehour, fill = bot_label)) +
+  geom_histogram(aes(y = ..count..), binwidth = 2,
+                 position="identity", alpha=0.6) +
+  scale_x_continuous(name = "Hour",
+                     breaks = seq(0, 24, 1),
+                     limits=c(0, 24)) +
+  scale_y_continuous(name = "Number of clicks") + last_plot() + aes(group=rev(bot_label))
+p7 + scale_fill_manual (values=palette)
+p7$layers <- c(geom_histogram(binwidth = 1))
+
+
+
+install.packages("devtools")
+library(devtools)
+install_github("easyGgplot2", "kassambara")
+library(easyGgplot2)
+
+g <- ggplot2.histogram(data=sample, xName='eventcreatehour',
+                  groupName='bot_label', legendPosition="top", binwidth = 1) + scale_x_continuous(name = "Hour", breaks = seq(0, 24, 1), limits=c(0, 24)) + scale_y_continuous(name = "Number of clicks") 
+g + scale_fill_manual (values=palette)
+
+df[ order(df$ot_time , decreasing = TRUE ),]
+df$time
+
+df <- df[order(df$ot_time),]
+session1 <- subset(df, ot_vid == '339f6f40-7a76-4340-848f-59b6d8741b52.v1', 
+                    select=c(bot_label, ot_time, ot_vid, ot_pagecluster))
+session1$rank <- rank(session1$ot_time,ties.method = "min")
+
+# PAGE CLUSTER
+# Undersanding the most clicked page clusters by bots/users (12 the most frequent)
+palette = c('#A1CCC9', '#B199AE')
+
+sort(table(sample$ot_pagecluster),decreasing=T)[1:12]
+criteria = c('Artikeldetailseite','Produktliste',
+             'Bestellvorgang' ,'Merkzettel', 'Suchergebnisseite', 'Storefront',
+             'Einstiegsseite', 'MeinKonto', 'Warenkorbbestaetigung',
+             'Login', 'Kundenbewertungsseite', 'Service')
+bots_sessions <- subset(sample, bot_label == "bot" & ot_pagecluster %in% criteria, 
+                  select=c(bot_label, ot_time, ot_vid, ot_pagecluster))
+users_sessions <- subset(sample, bot_label == "user" & ot_pagecluster %in% criteria,
+                        select=c(bot_label, ot_time, ot_vid, ot_pagecluster))
+mix1 <- rbind(users_sessions, bots_sessions)
+
+g <- ggplot(mix1, aes(x = ot_pagecluster))  #geom_bar(position = 'fill')
+g + geom_bar(aes(fill=bot_label), position = 'fill') + 
+  theme(axis.text.x = element_text(angle=35, vjust=0.6)) + 
+  labs(title="Most clicked page clusters by bots and users", 
+       subtitle="12 the most popular page clusters") + scale_fill_manual (values=palette)
+
+t2 <- table(sample$bot_label, sample$ot_pagecluster)
+t2
+
+# SHOP FORMAT
+s <- ggplot(df, aes(x = ot_shopformat, fill = bot_label)) + geom_bar(position = "fill")
+s + labs(title="Most preferred shop format by bots and by users")
